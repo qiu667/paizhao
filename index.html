@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b0b12">
+<title>让我为你拍张照吧</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    background: radial-gradient(circle at 50% 26%, #2b2b4d 0%, #16161f 58%, #0a0a11 100%);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .stage { position: fixed; inset: 0; }
+
+  /* ---------- 场景 ---------- */
+  .scene {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(16px, 3.4vh, 30px);
+    padding: 24px;
+    text-align: center;
+  }
+  .scene.active { display: flex; }
+
+  /* ---------- 场景一：相机 ---------- */
+  .camera {
+    font-size: clamp(88px, 25vw, 156px);
+    line-height: 1;
+    filter: drop-shadow(0 20px 34px rgba(0, 0, 0, .55));
+    animation: float 2.8s ease-in-out infinite, dropIn .7s cubic-bezier(.2, 1.4, .4, 1) both;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(-2.5deg); }
+    50%      { transform: translateY(-14px) rotate(2.5deg); }
+  }
+
+  @keyframes dropIn {
+    0%   { opacity: 0; scale: .4; }
+    100% { opacity: 1; scale: 1; }
+  }
+
+  .line {
+    font-size: clamp(17px, 4.6vw, 23px);
+    letter-spacing: .08em;
+    color: #e9e7f7;
+    text-shadow: 0 2px 18px rgba(140, 130, 255, .35);
+    opacity: 0;
+    animation: fadeUp .8s .35s ease-out forwards;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .answers {
+    display: flex;
+    gap: clamp(14px, 4vw, 24px);
+    opacity: 0;
+    animation: fadeUp .8s .6s ease-out forwards;
+  }
+
+  /* ---------- 按钮 ---------- */
+  .btn {
+    font: inherit;
+    font-size: clamp(15px, 4vw, 18px);
+    letter-spacing: .06em;
+    padding: 13px 36px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .22);
+    background: rgba(255, 255, 255, .08);
+    color: #fff;
+    cursor: pointer;
+    transition: transform .3s cubic-bezier(.34, 1.56, .64, 1),
+                background .2s, box-shadow .2s;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+
+  .btn:hover { background: rgba(255, 255, 255, .16); }
+
+  .btn:active { transform: scale(.94); }
+
+  .btn.yes {
+    background: linear-gradient(180deg, #ffffff, #e7e3ff);
+    color: #16162a;
+    border-color: #fff;
+    box-shadow: 0 12px 32px rgba(170, 160, 255, .38);
+    font-weight: 600;
+  }
+  .btn.yes:hover { box-shadow: 0 16px 44px rgba(170, 160, 255, .58); }
+
+  /* ---------- 场景二：照片 ---------- */
+  .photo-card {
+    background: #fff;
+    padding: 13px 13px 54px;
+    border-radius: 8px;
+    box-shadow: 0 28px 64px rgba(0, 0, 0, .62), 0 0 0 1px rgba(255, 255, 255, .08);
+    transform-origin: 50% 80%;
+    animation: photoIn .8s cubic-bezier(.2, 1.25, .4, 1) both;
+    cursor: pointer;
+    position: relative;
+  }
+
+  @keyframes photoIn {
+    0%   { opacity: 0; transform: scale(.5) rotate(-14deg); }
+    100% { opacity: 1; transform: scale(1) rotate(-2.5deg); }
+  }
+
+  /* 照片内部容器：负责背景从黑到相纸白的渐变 */
+  .photo-inner {
+    width: min(62vw, 250px);
+    height: min(62vw, 250px);
+    display: grid;
+    place-items: center;
+    position: relative;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #08080a; /* 初始黑底 */
+    transition: background 2.5s ease-in-out;
+  }
+
+  /* 显影完成后，背景变成相纸的白色 */
+  .photo-inner.develop {
+    background: radial-gradient(circle at 50% 38%, #f7f3ff, #ffe4ec);
+  }
+
+  /* 小丑图像：初始是底片（反色、暗），显影后恢复正常彩色 */
+  .photo-img {
+    font-size: clamp(68px, 26vw, 138px);
+    line-height: 1;
+    position: relative;
+    z-index: 1;
+    /* 模拟底片：反色、去色、压暗 */
+    filter: invert(1) grayscale(0.7) brightness(0.5);
+    transition: filter 2.5s ease-in-out;
+  }
+
+  .photo-img.develop {
+    filter: none; /* 还原真实色彩 */
+  }
+
+  /* 黑色暗房遮罩（初始状态盖住整张照片） */
+  .darkroom-mask {
+    position: absolute;
+    inset: 0;
+    background: #000;
+    z-index: 2;
+    transition: opacity 1s ease-in-out;
+    opacity: 1;
+  }
+
+  .darkroom-mask.develop {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 显影提示语 */
+  .hint-text {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 13px;
+    color: #999;
+    letter-spacing: 2px;
+    animation: pulse 1.5s infinite;
+    pointer-events: none;
+  }
+
+  .hint-text.hide { display: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: .3; }
+    50%      { opacity: 1; }
+  }
+
+  /* ---------- 全屏闪光：变成全白，再慢慢渐变褪去 ---------- */
+  .flash {
+    position: fixed;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 60;
+  }
+
+  .flash.fire {
+    animation: fadeWhiteOut 1.8s ease-in-out forwards;
+  }
+
+  @keyframes fadeWhiteOut {
+    0%   { opacity: 1; }
+    20%  { opacity: 1; } /* 前 0.36s 保持全白 */
+    100% { opacity: 0; } /* 随后 1.44s 慢慢淡出 */
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+
+  <!-- 场景一：首页 -->
+  <section class="scene active" id="sceneIntro">
+    <div class="camera">📷</div>
+    <p class="line">让我为你拍张照吧</p>
+    <div class="answers">
+      <button type="button" class="btn yes" id="btnYes">可以</button>
+      <button type="button" class="btn no" id="btnNo">不要</button>
+    </div>
+  </section>
+
+  <!-- 场景二：小丑照片 -->
+  <section class="scene" id="sceneClown">
+    <div class="photo-card" id="photoCard">
+      <div class="photo-inner" id="photoInner">
+        <div class="photo-img" id="photoImg">🤡</div>
+        <!-- 黑色遮罩 -->
+        <div class="darkroom-mask" id="darkroomMask">
+          <div class="hint-text" id="hintText">轻点照片显影</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- 全屏白闪层 -->
+<div class="flash" id="flash"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var el = function (id) { return document.getElementById(id); };
+
+  var sceneIntro = el('sceneIntro');
+  var sceneClown = el('sceneClown');
+  var flash      = el('flash');
+  var btnYes     = el('btnYes');
+  var btnNo      = el('btnNo');
+  var photoCard  = el('photoCard');
+  var photoInner = el('photoInner');
+  var photoImg   = el('photoImg');
+  var darkroomMask = el('darkroomMask');
+  var hintText   = el('hintText');
+
+  var isDeveloped = false;
+
+  /* =========================================================
+     音效（Web Audio API）
+     ========================================================= */
+  var actx = null;
+
+  function ctx() {
+    if (!actx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      actx = new AC();
+    }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+
+  function noiseBuffer(dur) {
+    var c = ctx();
+    var len = Math.max(1, Math.floor(c.sampleRate * dur));
+    var buf = c.createBuffer(1, len, c.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  /* 相机咔嚓声 */
+  function playShutter() {
+    var c = ctx();
+    if (!c) return;
+    var t0 = c.currentTime + 0.01;
+
+    var src = c.createBufferSource();
+    src.buffer = noiseBuffer(0.25);
+
+    var bp = c.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2800;
+    bp.Q.value = 0.8;
+
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.6, t0 + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.055);
+    g.gain.setValueAtTime(0.0001, t0 + 0.078);
+    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.086);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.17);
+
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(c.destination);
+    src.start(t0);
+    src.stop(t0 + 0.25);
+
+    var o = c.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(220, t0);
+    o.frequency.exponentialRampToValueAtTime(70, t0 + 0.14);
+
+    var og = c.createGain();
+    og.gain.setValueAtTime(0.0001, t0);
+    og.gain.exponentialRampToValueAtTime(0.22, t0 + 0.006);
+    og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+
+    o.connect(og);
+    og.connect(c.destination);
+    o.start(t0);
+    o.stop(t0 + 0.18);
+  }
+
+  /* 哈哈大笑 */
+  function playLaugh() {
+    var c = ctx();
+    if (!c) return;
+
+    var t = c.currentTime + 0.15;
+    var count = 9;
+
+    for (var i = 0; i < count; i++) {
+      var dur = 0.11 + Math.random() * 0.045;
+      var f0 = 232 - i * 6 + (Math.random() * 22 - 11);
+
+      var o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0 * 1.5, t);
+      o.frequency.exponentialRampToValueAtTime(Math.max(60, f0 * 0.8), t + dur);
+
+      var bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1100, t);
+      bp.frequency.exponentialRampToValueAtTime(700, t + dur);
+      bp.Q.value = 3;
+
+      var lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 3200;
+
+      var g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+      o.connect(bp);
+      bp.connect(lp);
+      lp.connect(g);
+      g.connect(c.destination);
+      o.start(t);
+      o.stop(t + dur + 0.02);
+
+      /* 气声 */
+      var ns = c.createBufferSource();
+      ns.buffer = noiseBuffer(0.12);
+
+      var hp = c.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 1800;
+
+      var ng = c.createGain();
+      ng.gain.setValueAtTime(0.0001, t);
+      ng.gain.exponentialRampToValueAtTime(0.075, t + 0.008);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+
+      ns.connect(hp);
+      hp.connect(ng);
+      ng.connect(c.destination);
+      ns.start(t);
+      ns.stop(t + 0.12);
+
+      t += dur + 0.038;
+    }
+  }
+
+  /* =========================================================
+     场景切换
+     ========================================================= */
+  function showScene(target) {
+    [sceneIntro, sceneClown].forEach(function (s) {
+      s.classList.toggle('active', s === target);
+    });
+  }
+
+  /* =========================================================
+     「可以」→ 拍照
+     ========================================================= */
+  btnYes.addEventListener('click', function () {
+    playShutter();
+
+    flash.classList.remove('fire');
+    void flash.offsetWidth; 
+    flash.classList.add('fire');
+
+    showScene(sceneClown);
+    
+    // 重置所有状态（确保是全新的底片）
+    isDeveloped = false;
+    darkroomMask.classList.remove('develop');
+    photoInner.classList.remove('develop');
+    photoImg.classList.remove('develop');
+    hintText.classList.remove('hide');
+  });
+
+  /* =========================================================
+     「点击照片」→ 底片显影（从底片状态变成正常照片）
+     ========================================================= */
+  photoCard.addEventListener('click', function () {
+    if (isDeveloped) return;
+    isDeveloped = true;
+
+    // 隐藏提示文字
+    hintText.classList.add('hide');
+
+    // 1. 黑色遮罩消失（露出底片）
+    darkroomMask.classList.add('develop');
+    
+    // 2. 底片缓慢变回正常色彩，背景从黑底渐变为白底
+    photoInner.classList.add('develop');
+    photoImg.classList.add('develop');
+
+    // 3. 播放笑声
+    playLaugh();
+  });
+
+  /* =========================================================
+     「不要」→ 躲开
+     ========================================================= */
+  var noX = 0, noY = 0, dodging = false;
+
+  function dodgeNo() {
+    if (dodging) return;
+    dodging = true;
+    setTimeout(function () { dodging = false; }, 260);
+
+    var r = btnNo.getBoundingClientRect();
+    var baseL = r.left   - noX;
+    var baseT = r.top    - noY;
+    var baseR = r.right  - noX;
+    var baseB = r.bottom - noY;
+
+    var opts = [
+      [-140, -80], [140, 70], [-120, 90], [150, -60],
+      [0, 110], [-170, 10], [170, 20], [-80, -110]
+    ];
+    var pick = opts[(Math.random() * opts.length) | 0];
+
+    var m = 14;
+    var nx = pick[0];
+    var ny = pick[1];
+
+    if (baseL + nx < m) nx = m - baseL;
+    if (baseR + nx > window.innerWidth - m) nx = window.innerWidth - m - baseR;
+    if (baseT + ny < m) ny = m - baseT;
+    if (baseB + ny > window.innerHeight - m) ny = window.innerHeight - m - baseB;
+
+    noX = nx;
+    noY = ny;
+
+    btnNo.style.transform =
+      'translate(' + nx.toFixed(1) + 'px, ' + ny.toFixed(1) + 'px) rotate(' +
+      (Math.random() * 18 - 9).toFixed(1) + 'deg)';
+  }
+
+  btnNo.addEventListener('pointerenter', dodgeNo);
+  btnNo.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    dodgeNo();
+  });
+
+})();
+</script>
+</body>
+  </html>
